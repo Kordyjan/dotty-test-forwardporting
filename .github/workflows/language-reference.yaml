@@ -71,18 +71,46 @@ jobs:
   backport-to-main:
     name: Create pull request with backport to main
     permissions:
+      contents: write
       pull-requests: write
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
       - run: |
-          declare -r Remote=`echo "${{ github.server_url }}" | sed -E "s/(.*)\/\/(.*)/\1\/\/${{ github.actor }}:${{ github.token }}@\2\/${{ github.repository }}/"`
-          declare -r BranchName=reference-merge-${{ github.event.head_commit.id }}
-          git switch -c
+          Url=${{ github.server_url }}
+          Server=${Url#*://}
+          Scheme=${Url%%://*}
+          Remote=${Scheme}://${{ github.token }}@${Server}/${{ github.repository }}
+          BranchName=reference-merge-${{ github.event.head_commit.id }}
+
+          Retained=`cat .github/workflows/reference_paths.txt`
           git restore --source=origin/main -- .
-          xargs git restore -- <.github/workflows/reference_paths.txt
-          git push -u Remote $BranchName
+          echo $Retained | xargs git restore --
+
+          git config --global user.email "noreply@github.com"
+          git config --global user.name "github-actions[bot]"
+          git commit -a -m "Sync the documentation branch"
+          git push $Remote HEAD:refs/heads/$BranchName
+
+          curl \
+            -X POST \
+            -H "Authorization: Bearer ${{ github.token }}" \
+            ${{ github.api_url}}/${{ github.repository }} \
+            -d '{
+              "title": "Sync with the stable documentation branch",
+              "head": "${BranchName}",
+              "base": "main",
+              "body": "
+                This pull request is syncing the main with changes from language-reference-stable.
+
+                It was created automatically after ${{ github.event.head_commit.id }} by @${{ github.event.head_commit.author.username }}
+              ",
+              "maintainer_can_modify": true
+            }'
+
       # - uses: repo-sync/pull-request@v2
       #   with:
       #     destination_branch: main
