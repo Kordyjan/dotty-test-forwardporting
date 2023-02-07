@@ -28,6 +28,10 @@ object Feature:
   val symbolLiterals = deprecated("symbolLiterals")
   val fewerBraces = experimental("fewerBraces")
   val saferExceptions = experimental("saferExceptions")
+  val pureFunctions = experimental("pureFunctions")
+  val captureChecking = experimental("captureChecking")
+
+  val globalOnlyImports: Set[TermName] = Set(pureFunctions, captureChecking)
 
   /** Is `feature` enabled by by a command-line setting? The enabling setting is
    *
@@ -75,6 +79,20 @@ object Feature:
 
   def scala2ExperimentalMacroEnabled(using Context) = enabled(scala2macros)
 
+  def pureFunsEnabled(using Context) =
+    enabledBySetting(pureFunctions)
+    || ctx.compilationUnit.knowsPureFuns
+    || ccEnabled
+
+  def ccEnabled(using Context) =
+    enabledBySetting(captureChecking)
+    || ctx.compilationUnit.needsCaptureChecking
+
+  def pureFunsEnabledSomewhere(using Context) =
+    enabledBySetting(pureFunctions)
+    || enabledBySetting(captureChecking)
+    || ctx.run != null && ctx.run.nn.pureFunsImportEncountered
+
   def sourceVersionSetting(using Context): SourceVersion =
     SourceVersion.valueOf(ctx.settings.source.value)
 
@@ -83,7 +101,11 @@ object Feature:
       case Some(v) => v
       case none => sourceVersionSetting
 
-  def migrateTo3(using Context): Boolean = sourceVersion == `3.0-migration`
+  def migrateTo3(using Context): Boolean =
+    sourceVersion == `3.0-migration`
+
+  def fewerBracesEnabled(using Context) =
+    sourceVersion.isAtLeast(`3.3`) || enabled(fewerBraces)
 
   /** If current source migrates to `version`, issue given warning message
    *  and return `true`, otherwise return `false`.
@@ -121,4 +143,16 @@ object Feature:
   def isExperimentalEnabled(using Context): Boolean =
     Properties.experimental && !ctx.settings.YnoExperimental.value
 
+  def handleGlobalLanguageImport(prefix: TermName, imported: Name)(using Context): Boolean =
+    val fullFeatureName = QualifiedName(prefix, imported.asTermName)
+    if fullFeatureName == pureFunctions then
+      ctx.compilationUnit.knowsPureFuns = true
+      if ctx.run != null then ctx.run.nn.pureFunsImportEncountered = true
+      true
+    else if fullFeatureName == captureChecking then
+      ctx.compilationUnit.needsCaptureChecking = true
+      if ctx.run != null then ctx.run.nn.pureFunsImportEncountered = true
+      true
+    else
+      false
 end Feature
